@@ -10,22 +10,23 @@ if (!extension_loaded('swoole')) {
  *
  */
 $pwd = empty($_SERVER['PWD']) ? __DIR__ : $_SERVER['PWD'];
-$opt = getopt('cd:e:i:', ['dir:','interval:','ext:','exclude:','nologger']);
+$opt = getopt('cd:e:i:', ['dir:', 'interval:', 'ext:', 'exclude:', 'nologger', 'stop']);
 $dir = empty($opt['d']) ? (empty($opt['dir']) ? $pwd : $opt['dir']) : $opt['d'];
 $interval = empty($opt['i']) ? (empty($opt['interval']) ? 2 : $opt['interval']) : $opt['i'];
 $ext = empty($opt['e']) ? (empty($opt['ext']) ? 'php,env' : $opt['ext']) : $opt['e'];
 $exclude = empty($opt['exclude']) ? 'vendor,runtime,public' : $opt['exclude'];
 $isClean = isset($opt['c']);
 $nologger = isset($opt['nologger']);
+$stop = isset($opt['stop']);
 
 # PHP Bin File PHP程序所在路径（默认自动获取）
 define('PHP_BIN_FILE', 'which php');
 # Watch Dir 监听目录（默认监听脚本执行的根目录）
 define('WATCH_DIR', $dir);
 # Watch Ext 监听扩展名（多个可用英文逗号隔开）
-define('WATCH_EXT', (string)$ext);
+define('WATCH_EXT', (string) $ext);
 # Exclude Dir 排除目录（不监听的目录，数组形式)
-define('EXCLUDE_DIR', array_filter(explode(',', (string)$exclude)));
+define('EXCLUDE_DIR', array_filter(explode(',', (string) $exclude)));
 # Entry Point File 入口文件
 define('ENTRY_POINT_FILE', $dir . '/bin/hyperf.php');
 # Start Command 启动命令
@@ -33,7 +34,7 @@ define('START_COMMAND', [ENTRY_POINT_FILE, 'start']);
 # PID File Path PID文件路径
 define('PID_FILE_PATH', $dir . '/runtime/hyperf.pid');
 # Scan Interval 扫描间隔（毫秒，默认2000）
-define('SCAN_INTERVAL', (int)$interval * 1000);
+define('SCAN_INTERVAL', (int) $interval * 1000);
 # Console Color 控制台颜色
 define('CONSOLE_COLOR_DEFAULT', "\033[0m");
 define('CONSOLE_COLOR_RED', "\033[0;31m");
@@ -75,24 +76,37 @@ foreach ($values as $val) {
     $_ENV[$name] = $value;
 }
 
+use Swoole\Event;
 use Swoole\Process;
 use Swoole\Timer;
-use Swoole\Event;
 
 swoole_async_set(['enable_coroutine' => false, 'log_level' => SWOOLE_LOG_INFO]);
 $hashes = [];
 $serve = null;
 
-echo CONSOLE_COLOR_YELLOW . "🚀 Start @ " . date('Y-m-d H:i:s') . PHP_EOL;
+check();
 start();
 state();
 Timer::tick(SCAN_INTERVAL, 'watch');
+
+function check()
+{
+    // 杀旧进程
+    killOldProcess();
+    global $stop;
+    if ($stop) {
+        echo CONSOLE_COLOR_YELLOW . "[.] Stop @ " . date('Y-m-d H:i:s') . PHP_EOL;
+        exit(0);
+    }
+}
 
 function killOldProcess()
 {
     // pid存在则关闭存在的进程
     if (file_exists(PID_FILE_PATH) && $pid = @file_get_contents(PID_FILE_PATH)) {
-        if (!@posix_kill($pid, 9)) forceKill();
+        if (!@posix_kill($pid, 9)) {
+            forceKill();
+        }
     } else {
         forceKill();
     }
@@ -104,7 +118,10 @@ function forceKill($match = '')
         $match = @$_ENV['APP_NAME'] . '.Master';
     }
     // 适配MacOS
-    if (PHP_OS == 'Darwin') $match = ENTRY_POINT_FILE;
+    if (PHP_OS == 'Darwin') {
+        $match = ENTRY_POINT_FILE;
+    }
+
     $command = "ps -ef | grep '$match' | grep -v grep | awk '{print $2}' | xargs kill -9 2>&1";
     // 找不到pid，强杀进程
     exec($command);
@@ -112,8 +129,7 @@ function forceKill($match = '')
 
 function start()
 {
-    // 杀旧进程
-    killOldProcess();
+    echo CONSOLE_COLOR_YELLOW . "🚀 Start @ " . date('Y-m-d H:i:s') . PHP_EOL;
     global $serve;
     $serve = new Process('serve', true);
     $serve->start();
@@ -141,7 +157,10 @@ function addEvent($serve)
                 echo CONSOLE_COLOR_YELLOW . $message;
             } elseif ($error) {
                 echo CONSOLE_COLOR_RED . $message;
-            } else echo CONSOLE_COLOR_DEFAULT . $message;
+            } else {
+                echo CONSOLE_COLOR_DEFAULT . $message;
+            }
+
             echo CONSOLE_COLOR_DEFAULT;
         }
     });
@@ -184,8 +203,14 @@ function change()
 function serve(Process $serve)
 {
     global $isClean, $nologger;
-    if ($isClean) delDir('./runtime/container');
-    if ($nologger) delDir('./runtime/logs');
+    if ($isClean) {
+        delDir('./runtime/container');
+    }
+
+    if ($nologger) {
+        delDir('./runtime/logs');
+    }
+
     $serve->exec(PHP, START_COMMAND);
 }
 
