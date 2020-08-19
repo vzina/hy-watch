@@ -1,6 +1,8 @@
 #!/usr/bin/env php
 <?php
-
+if (!extension_loaded('swoole')) {
+    exit('缺少swoole扩展');
+}
 /**
  * 用法:
  * 在项目根目录下打开终端控制台，输入：hy-watch
@@ -8,12 +10,13 @@
  *
  */
 $pwd = empty($_SERVER['PWD']) ? __DIR__ : $_SERVER['PWD'];
-$opt = getopt('cd:e:i:', ['dir:interval:ext:exclude:']);
-$dir = empty($opt['d']) ? empty($opt['dir']) ? $pwd : $opt['dir'] : $opt['d'];
-$interval = empty($opt['i']) ? empty($opt['interval']) ? 2 : $opt['interval'] : $opt['i'];
-$ext = empty($opt['e']) ? empty($opt['ext']) ? 'php,env' : $opt['ext'] : $opt['e'];
+$opt = getopt('cd:e:i:', ['dir:','interval:','ext:','exclude:','nologger']);
+$dir = empty($opt['d']) ? (empty($opt['dir']) ? $pwd : $opt['dir']) : $opt['d'];
+$interval = empty($opt['i']) ? (empty($opt['interval']) ? 2 : $opt['interval']) : $opt['i'];
+$ext = empty($opt['e']) ? (empty($opt['ext']) ? 'php,env' : $opt['ext']) : $opt['e'];
 $exclude = empty($opt['exclude']) ? 'vendor,runtime,public' : $opt['exclude'];
 $isClean = isset($opt['c']);
+$nologger = isset($opt['nologger']);
 
 # PHP Bin File PHP程序所在路径（默认自动获取）
 define('PHP_BIN_FILE', 'which php');
@@ -62,7 +65,7 @@ if (!file_exists(ENTRY_POINT_FILE)) {
 }
 
 # 加载env
-$content = @file_get_contents('.env');
+$content = @file_get_contents($dir . '/.env');
 $values = array_filter(preg_split("/(\r\n|\n|\r)/", $content));
 foreach ($values as $val) {
     if (substr($val, 0, 1) === '#') {
@@ -89,8 +92,10 @@ function killOldProcess()
 {
     // pid存在则关闭存在的进程
     if (file_exists(PID_FILE_PATH) && $pid = @file_get_contents(PID_FILE_PATH)) {
-        if (!@posix_kill($pid)) forceKill();
-    } else forceKill();
+        if (!@posix_kill($pid, 9)) forceKill();
+    } else {
+        forceKill();
+    }
 }
 
 function forceKill($match = '')
@@ -178,8 +183,9 @@ function change()
 
 function serve(Process $serve)
 {
-    global $isClean;
+    global $isClean, $nologger;
     if ($isClean) delDir('./runtime/container');
+    if ($nologger) delDir('./runtime/logs');
     $serve->exec(PHP, START_COMMAND);
 }
 
